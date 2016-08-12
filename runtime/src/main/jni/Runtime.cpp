@@ -57,7 +57,7 @@ Runtime::Runtime(JNIEnv *env, jobject runtime, int id)
 	: m_env(env), m_id(id), m_isolate(nullptr)
 {
 	m_runtime = m_env.NewGlobalRef(runtime);
-	m_objectManager = new ObjectManager(m_isolate, m_runtime);
+	m_objectManager = new ObjectManager(m_runtime);
 	s_id2RuntimeCache.insert(make_pair(id, this));
 }
 
@@ -432,6 +432,7 @@ Isolate* Runtime::PrepareV8Runtime(const string& filesPath, jstring packageName,
 	Isolate::Scope isolate_scope(isolate);
 	HandleScope handleScope(isolate);
 
+	m_objectManager->SetInstanceIsolate(isolate);
 	V8::SetFlagsFromString(Constants::V8_STARTUP_FLAGS.c_str(), Constants::V8_STARTUP_FLAGS.size());
 	V8::SetCaptureStackTraceForUncaughtExceptions(true, 100, StackTrace::kOverview);
 	V8::AddMessageListener(NativeScriptException::OnUncaughtError);
