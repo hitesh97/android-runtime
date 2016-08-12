@@ -9,8 +9,6 @@
 #include "V8StringConstants.h"
 #include "NativeScriptException.h"
 #include "Runtime.h"
-#include <assert.h>
-#include <algorithm>
 #include <sstream>
 
 using namespace v8;
@@ -18,8 +16,8 @@ using namespace std;
 using namespace tns;
 
 
-ObjectManager::ObjectManager(jobject javaRuntimeObject)
-	: m_javaRuntimeObject(javaRuntimeObject), m_env(JEnv()), m_numberOfGC(0), m_currentObjectId(0), m_cache(NewWeakGlobalRefCallback, DeleteWeakGlobalRefCallback, 1000, this)
+ObjectManager::ObjectManager(Isolate *isolate, jobject javaRuntimeObject)
+	:m_isolate(isolate), m_javaRuntimeObject(javaRuntimeObject), m_env(JEnv()), m_numberOfGC(0), m_currentObjectId(0), m_cache(NewWeakGlobalRefCallback, DeleteWeakGlobalRefCallback, 1000, this)
 {
 	auto runtimeClass = m_env.FindClass("com/tns/Runtime");
 	assert(runtimeClass != nullptr);
@@ -238,7 +236,7 @@ void ObjectManager::Link(const Local<Object>& object, uint32_t javaObjectID, jcl
 	auto state = new ObjectWeakCallbackState(this, jsInstanceInfo, objectHandle);
 
 	// subscribe for JS GC event
-	objectHandle->SetWeak(state, JSObjectWeakCallbackStatic);
+	objectHandle->SetWeak(state, JSObjectWeakCallbackStatic, WeakCallbackType::kParameter);
 
 	auto jsInfoIdx = static_cast<int>(MetadataNodeKeys::JsInfo);
 
@@ -284,7 +282,7 @@ string ObjectManager::GetClassName(jclass clazz)
 	return className;
 }
 
-void ObjectManager::JSObjectWeakCallbackStatic(const WeakCallbackData<Object, ObjectWeakCallbackState>& data)
+void ObjectManager::JSObjectWeakCallbackStatic(const WeakCallbackInfo<ObjectWeakCallbackState>& data)
 {
 	ObjectWeakCallbackState *callbackState = data.GetParameter();
 
@@ -345,7 +343,7 @@ void ObjectManager::JSObjectWeakCallback(Isolate *isolate, ObjectWeakCallbackSta
 		}
 	}
 
-	po->SetWeak(callbackState, JSObjectWeakCallbackStatic);
+	po->SetWeak(callbackState, JSObjectWeakCallbackStatic, WeakCallbackType::kParameter);
 }
 
 int ObjectManager::GenerateNewObjectID()
@@ -387,11 +385,9 @@ void ObjectManager::ReleaseJSInstance(Persistent<Object> *po, JSInstanceInfo *js
  * */
 void ObjectManager::ReleaseRegularObjects()
 {
-	Isolate *isolate = Isolate::GetCurrent();
+	HandleScope handleScope(m_isolate);
 
-	HandleScope handleScope(isolate);
-
-	auto propName = String::NewFromUtf8(isolate, "t::gcNum");
+	auto propName = String::NewFromUtf8(m_isolate, "t::gcNum", NewStringType::kNormal).ToLocalChecked();
 
 	auto& topGCInfo = m_markedForGC.top();
 	auto& marked = topGCInfo.markedForGC;
@@ -402,11 +398,12 @@ void ObjectManager::ReleaseRegularObjects()
 		if (m_released.contains(po))
 			continue;
 
-		auto obj = Local<Object>::New(isolate, *po);
+		auto obj = Local<Object>::New(m_isolate, *po);
 
 		assert(!obj.IsEmpty());
 
-		auto gcNum = obj->GetHiddenValue(propName);
+		Local<Value> gcNum;
+		V8GetPrivateValue(m_isolate, obj, propName, gcNum);
 
 		bool isReachableFromImplementationObject = false;
 
@@ -436,7 +433,7 @@ void ObjectManager::ReleaseRegularObjects()
 
 bool ObjectManager::HasImplObject(Isolate *isolate, const Local<Object>& obj)
 {
-	auto implObject = MetadataNode::GetImplementationObject(obj);
+	auto implObject = MetadataNode::GetImplementationObject(isolate, obj);
 
 	bool hasImplObj = !implObject.IsEmpty();
 
@@ -486,7 +483,8 @@ void ObjectManager::MarkReachableObjects(Isolate *isolate, const Local<Object>& 
 				// here we are leaving "callback2" object to remain strong in java
 				m_implObjStrong[jsInfo->JavaObjectID] = nullptr;
 			}
-			o->SetHiddenValue(propName, curGCNumValue);
+
+			V8SetPrivateValue(isolate, o, propName, curGCNumValue);
 		}
 
 		uint8_t *addr = NativeScriptExtension::GetAddress(o);

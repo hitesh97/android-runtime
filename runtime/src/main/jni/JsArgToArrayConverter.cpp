@@ -160,7 +160,8 @@ bool JsArgToArrayConverter::ConvertArg(const Local<Value>& arg, int index)
 	{
 		auto jsObj = arg->ToObject();
 
-		auto castType = NumericCasts::GetCastType(jsObj);
+		auto castType = NumericCasts::GetCastType(m_isolate, jsObj);
+
 		Local<Value> castValue;
 		jchar charValue;
 		jbyte byteValue;
@@ -273,7 +274,7 @@ bool JsArgToArrayConverter::ConvertArg(const Local<Value>& arg, int index)
 			case CastType::None:
 				obj = objectManager->GetJavaObjectByJsObject(jsObj);
 
-				castValue = jsObj->GetHiddenValue(V8StringConstants::GetNullNodeName());
+				V8GetPrivateValue(m_isolate, jsObj, V8StringConstants::GetNullNodeName(), castValue);
 
 				if(!castValue.IsEmpty()) {
 					auto node = reinterpret_cast<MetadataNode*>(castValue.As<External>()->Value());

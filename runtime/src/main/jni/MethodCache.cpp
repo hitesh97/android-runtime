@@ -128,21 +128,21 @@ string MethodCache::EncodeSignature(const string& className, const string& metho
 	for (int i = 0; i < len; i++)
 	{
 		sig.append(".");
-		sig.append(GetType(args[i]));
+		sig.append(GetType(args.GetIsolate(), args[i]));
 	}
 
 	return sig;
 }
 
-string MethodCache::GetType(const v8::Local<v8::Value>& value)
+string MethodCache::GetType(Isolate *isolate, const v8::Local<v8::Value>& value)
 {
 	string type;
 
 	if(value->IsObject())
 	{
 		auto objVal = value->ToObject();
-
-		Local<Value> nullNode = objVal->GetHiddenValue(V8StringConstants::GetNullNodeName());
+		Local<Value> nullNode; //out
+		V8GetPrivateValue(isolate, objVal, V8StringConstants::GetNullNodeName(), nullNode);
 
 		if(!nullNode.IsEmpty()) {
 			auto treeNode = reinterpret_cast<MetadataNode*>(nullNode.As<External>()->Value());
@@ -200,7 +200,7 @@ string MethodCache::GetType(const v8::Local<v8::Value>& value)
 	else if (value->IsObject())
 	{
 		auto object = value->ToObject();
-		auto castType = NumericCasts::GetCastType(object);
+		auto castType = NumericCasts::GetCastType(isolate, object);
 		MetadataNode *node;
 
 		switch (castType)

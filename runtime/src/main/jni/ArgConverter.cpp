@@ -1,17 +1,13 @@
 #include "ArgConverter.h"
 #include "ObjectManager.h"
-#include "JniLocalRef.h"
 #include "Util.h"
 #include "V8GlobalHelpers.h"
 #include "V8StringConstants.h"
-#include "NativeScriptAssert.h"
 #include "NativeScriptException.h"
 #include "NumericCasts.h"
-#include "JType.h"
 #include "Runtime.h"
-#include <assert.h>
+#include "V8GlobalHelpers.h"
 #include <sstream>
-#include <cstdlib>
 
 using namespace v8;
 using namespace std;
@@ -83,8 +79,8 @@ void ArgConverter::NativeScriptLongFunctionCallback(const v8::FunctionCallbackIn
 		auto isolate = args.GetIsolate();
 		auto thiz = args.This();
 		auto cache = GetCache(isolate);
-		thiz->SetHiddenValue(V8StringConstants::GetJavaLong(), Boolean::New(isolate, true));
-		NumericCasts::MarkAsLong(thiz, args[0]);
+		V8SetPrivateValue(isolate, thiz, V8StringConstants::GetJavaLong(), Boolean::New(isolate, true));
+		NumericCasts::MarkAsLong(isolate, thiz, args[0]);
 		thiz->SetPrototype(Local<NumberObject>::New(isolate, *cache->NanNumberObject));
 	}
 	catch (NativeScriptException& e)

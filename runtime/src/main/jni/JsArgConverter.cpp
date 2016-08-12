@@ -134,7 +134,7 @@ bool JsArgConverter::ConvertArg(const Local<Value>& arg, int index)
 		jlong javaLongValue;
 		auto jsObject = arg->ToObject();
 
-		auto castType = NumericCasts::GetCastType(jsObject);
+		auto castType = NumericCasts::GetCastType(m_isolate, jsObject);
 
 		Local<Value> castValue;
 		JniLocalRef obj;
@@ -226,7 +226,8 @@ bool JsArgConverter::ConvertArg(const Local<Value>& arg, int index)
 			case CastType::None:
 				obj = objectManager->GetJavaObjectByJsObject(jsObject);
 
-				castValue = jsObject->GetHiddenValue(ConvertToV8String(V8StringConstants::NULL_NODE_NAME));
+				V8GetPrivateValue(m_isolate, jsObject, ConvertToV8String(V8StringConstants::NULL_NODE_NAME), castValue);
+
 				if(!castValue.IsEmpty()) {
 					SetConvertedObject(index, nullptr);
 					success = true;
