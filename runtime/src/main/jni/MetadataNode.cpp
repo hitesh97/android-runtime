@@ -13,6 +13,8 @@
 #include <cctype>
 #include <assert.h>
 
+#include "v8.h"
+
 using namespace v8;
 using namespace std;
 using namespace tns;
@@ -533,8 +535,15 @@ void MetadataNode::SetInstanceMembersFromStaticMetadata(Isolate *isolate, Local<
 			auto funcData = External::New(isolate, callbackData);
 			auto funcTemplate = FunctionTemplate::New(isolate, MethodCallback, funcData);
 			auto func = funcTemplate->GetFunction();
+
 			auto funcName = ConvertToV8String(entry.name);
-			prototypeTemplate->Set(funcName, funcTemplate); //Wrap(isolate, func, entry.name, origin, false /* isCtorFunc */));
+
+
+            Local<Function> wrappedFunc =  Wrap(isolate, func, entry.name, origin, false /* isCtorFunc */);
+            //prototypeTemplate->Set(funcName, Wrap(isolate, func, entry.name, origin, false /* isCtorFunc */));
+
+            prototypeTemplate->SetAccessor(funcName, WrappedFunctionGetterCallback, 0, wrappedFunc);
+
 			lastMethodName = entry.name;
 		}
 
@@ -556,6 +565,10 @@ void MetadataNode::SetInstanceMembersFromStaticMetadata(Isolate *isolate, Local<
 	}
 }
 
+void MetadataNode::WrappedFunctionGetterCallback(Local<String> property, const PropertyCallbackInfo<Value>& info)
+{
+    info.GetReturnValue().Set(info.Data().As<Function>());
+}
 void MetadataNode::SetInstanceMembersFromRuntimeMetadata(Isolate *isolate, Local<FunctionTemplate>& ctorFuncTemplate, Local<ObjectTemplate>& prototypeTemplate, vector<MethodCallbackData*>& instanceMethodsCallbackData, const vector<MethodCallbackData*>& baseInstanceMethodsCallbackData, MetadataTreeNode *treeNode)
 {
 	SET_PROFILER_FRAME();
@@ -1738,11 +1751,11 @@ void MetadataNode::EnableProfiler(bool enableProfiler)
 	s_profilerEnabled = enableProfiler;
 }
 
-Local<Function> MetadataNode::Wrap(Isolate* isolate, const Local<Function>& f, const string& name, const string& origin,  bool isCtorFunc)
+Local<Function> MetadataNode::Wrap(Isolate* isolate, const Local<Function>& function, const string& name, const string& origin, bool isCtorFunc)
 {
 	if (!s_profilerEnabled)
 	{
-		return f;
+		return function;
 	}
 
 	static set<string> keywords;
@@ -1759,7 +1772,7 @@ Local<Function> MetadataNode::Wrap(Isolate* isolate, const Local<Function>& f, c
 
 	if (name == "<init>")
 	{
-		return f;
+		return function;
 	}
 
 	string actualName = name;
@@ -1809,10 +1822,10 @@ Local<Function> MetadataNode::Wrap(Isolate* isolate, const Local<Function>& f, c
 		if (!result.IsEmpty())
 		{
 			ret = result.As<Function>();
-			ret->Set(ConvertToV8String("__func"), f);
+			ret->Set(ConvertToV8String("__func"), function);
 
 			auto prototypePropName = ConvertToV8String("prototype");
-			ret->Set(prototypePropName, f->Get(prototypePropName));
+			ret->Set(prototypePropName, function->Get(prototypePropName));
 		}
 		else
 		{
