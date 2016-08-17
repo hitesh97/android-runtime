@@ -534,15 +534,21 @@ void MetadataNode::SetInstanceMembersFromStaticMetadata(Isolate *isolate, Local<
 
 			auto funcData = External::New(isolate, callbackData);
 			auto funcTemplate = FunctionTemplate::New(isolate, MethodCallback, funcData);
-			auto func = funcTemplate->GetFunction();
 
-			auto funcName = ConvertToV8String(entry.name);
+            auto funcName = ConvertToV8String(entry.name);
 
+            if (s_profilerEnabled)
+            {
+                auto func = funcTemplate->GetFunction();
+                Local<Function> wrappedFunc =  Wrap(isolate, func, entry.name, origin, false /* isCtorFunc */);
+                prototypeTemplate->SetAccessor(funcName, WrappedFunctionGetterCallback, 0, wrappedFunc);
+            }
+            else
+            {
+                prototypeTemplate->Set(funcName, funcTemplate);
+            }
 
-            Local<Function> wrappedFunc =  Wrap(isolate, func, entry.name, origin, false /* isCtorFunc */);
             //prototypeTemplate->Set(funcName, Wrap(isolate, func, entry.name, origin, false /* isCtorFunc */));
-
-            prototypeTemplate->SetAccessor(funcName, WrappedFunctionGetterCallback, 0, wrappedFunc);
 
 			lastMethodName = entry.name;
 		}
