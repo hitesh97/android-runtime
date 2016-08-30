@@ -176,7 +176,7 @@ public class Runtime
 		}
 
 		public WorkerThread(String name, Integer workerId) {
-			super(name);
+			super("W: " + name);
 			this.workerId = workerId;
 		}
 
