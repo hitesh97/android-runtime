@@ -101,6 +101,8 @@ public class Runtime
 	
 	private final StaticConfiguration config;
 	private static StaticConfiguration staticConfiguration;
+
+	private final DynamicConfiguration dynamicConfig;
 	
 	private final int runtimeId;
 
@@ -136,9 +138,13 @@ public class Runtime
 
 			this.runtimeId = nextRuntimeId++;
 			this.config = config;
+			this.dynamicConfig = dynamicConfiguration;
 			this.threadScheduler = dynamicConfiguration.getHandler();
 			this.workerId = dynamicConfiguration.getWorkerId();
-			this.mainThreadHandler = dynamicConfiguration.getMainThreadhandler();
+			if(dynamicConfiguration.getMainHandler() != null) {
+				this.mainThreadHandler = dynamicConfiguration.getMainHandler().getHandler();
+			}
+
 			classResolver = new ClassResolver(this);
 			currentRuntime.set(this);
 			runtimeCache.put(this.runtimeId, this);
@@ -172,7 +178,11 @@ public class Runtime
 				
 		return runtime;
 	}
-	
+
+	public DynamicConfiguration getDynamicConfig() {
+		return dynamicConfig;
+	}
+
 	public static boolean isInitialized()
 	{
 		Runtime runtime = Runtime.getCurrentRuntime();
@@ -200,24 +210,26 @@ public class Runtime
 	private static class WorkerThread extends HandlerThread {
 
 		private Integer workerId;
-		private Handler mainThreadHandler;
+		private ThreadScheduler mainThreadScheduler;
 
 		public WorkerThread(String name) {
 			super(name);
 		}
 
-		public WorkerThread(String name, Integer workerId, Handler mainThreadHandler) {
+		public WorkerThread(String name, Integer workerId, ThreadScheduler mainThreadScheduler) {
 			super("W: " + name);
 			this.workerId = workerId;
-			this.mainThreadHandler = mainThreadHandler;
+			this.mainThreadScheduler = mainThreadScheduler;
 		}
 
 		@Override
 		public void run() {
 			super.run();
 			WorkThreadScheduler workThreadScheduler = new WorkThreadScheduler(new WorkerThreadHandler());
-			DynamicConfiguration dynamicConfiguration = new DynamicConfiguration(this.workerId, workThreadScheduler, mainThreadHandler);
+
+			DynamicConfiguration dynamicConfiguration = new DynamicConfiguration(this.workerId, workThreadScheduler, this.mainThreadScheduler);
 			Runtime runtime = initRuntime(dynamicConfiguration);
+
 
 			/*
 				Send a message to the Main Thread to `shake hands`,
@@ -232,6 +244,10 @@ public class Runtime
 	}
 
 	private static class MainThreadHandler extends Handler {
+		public MainThreadHandler(Looper looper) {
+			super(looper);
+		}
+
 		@Override
 		public void handleMessage(Message msg) {
 			//todo: plamen5kov: implement main handle message
@@ -268,8 +284,8 @@ public class Runtime
 	 */
 	public static Runtime initializeRuntimeWithConfiguration(StaticConfiguration config) {
 		staticConfiguration = config;
-		WorkThreadScheduler workThreadScheduler = new WorkThreadScheduler(new MainThreadHandler());
-		DynamicConfiguration dynamicConfiguration = new DynamicConfiguration(-1, workThreadScheduler);
+		WorkThreadScheduler mainThreadScheduler = new WorkThreadScheduler(new MainThreadHandler(Looper.myLooper()));
+		DynamicConfiguration dynamicConfiguration = new DynamicConfiguration(0, mainThreadScheduler, null);
 		Runtime runtime = initRuntime(dynamicConfiguration);
 
 		return runtime;
@@ -282,8 +298,10 @@ public class Runtime
 	@RuntimeCallable
 	public static void initWorker (String jsFileName, int id) {
 		// This method will always be called from the Main thread
-		Handler mainThreadHandler = Runtime.getCurrentRuntime().threadScheduler.getHandler();
-		HandlerThread worker = new WorkerThread(jsFileName, id, mainThreadHandler);
+		Runtime runtime = Runtime.getCurrentRuntime();
+		ThreadScheduler mainThreadScheduler = runtime.getDynamicConfig().getHandler();
+
+		HandlerThread worker = new WorkerThread(jsFileName, id, mainThreadScheduler);
 		worker.start();
 	}
 
