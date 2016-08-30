@@ -8,10 +8,16 @@ import android.os.Handler;
 public class DynamicConfiguration {
     private Integer workerId;
     private ThreadScheduler threadScheduler;
+    private Handler mainThreadhandler;
 
     public DynamicConfiguration(Integer workerId, ThreadScheduler threadScheduler) {
         this.workerId = workerId;
         this.threadScheduler = threadScheduler;
+    }
+
+    public DynamicConfiguration(Integer workerId, ThreadScheduler threadScheduler, Handler mainThreadhandler) {
+        this(workerId, threadScheduler);
+        this.mainThreadhandler = mainThreadhandler;
     }
 
     public Integer getWorkerId() {
@@ -20,5 +26,9 @@ public class DynamicConfiguration {
 
     public ThreadScheduler getHandler() {
         return threadScheduler;
+    }
+
+    public Handler getMainThreadhandler() {
+        return mainThreadhandler;
     }
 }

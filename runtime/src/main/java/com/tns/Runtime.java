@@ -103,9 +103,26 @@ public class Runtime
 	private static StaticConfiguration staticConfiguration;
 	
 	private final int runtimeId;
+
+	/*
+		Used to map to Handler, for messaging between Main and the other Workers
+	 */
+	private final int workerId;
+
+	/*
+		Used by all Worker threads to communicate with the Main thread
+	 */
+	private Handler mainThreadHandler;
+
 	private static int nextRuntimeId = 0;
 	private final static ThreadLocal<Runtime> currentRuntime = new ThreadLocal<Runtime>();
 	private final static Map<Integer, Runtime> runtimeCache = new HashMap<Integer, Runtime>();
+
+	/*
+		Holds reference to all Worker Threads' handlers
+		Note: Should only be used on the main thread
+	 */
+	private Map<Integer, Handler> workerIdToHandler = new HashMap<>();
 	
 	public Runtime(StaticConfiguration config, DynamicConfiguration dynamicConfiguration)
 	{
@@ -116,9 +133,12 @@ public class Runtime
 			{
 				throw new NativeScriptException("There is an existing runtime on this thread with id=" + existingRuntime.getRuntimeId());
 			}
+
 			this.runtimeId = nextRuntimeId++;
 			this.config = config;
 			this.threadScheduler = dynamicConfiguration.getHandler();
+			this.workerId = dynamicConfiguration.getWorkerId();
+			this.mainThreadHandler = dynamicConfiguration.getMainThreadhandler();
 			classResolver = new ClassResolver(this);
 			currentRuntime.set(this);
 			runtimeCache.put(this.runtimeId, this);
@@ -160,32 +180,54 @@ public class Runtime
 		return (runtime != null) ? runtime.isInitializedImpl() : false;
 	}
 
+	public int getWorkerId() {
+		return workerId;
+	}
+
 	private static class WorkerThreadHandler extends Handler {
 		@Override
 		public void handleMessage(Message msg) {
 			//todo: plamen5kov: implement worker handle message
+			/*
+				Handle messages coming from the Main thread
+			 */
+			if(msg.arg1 == MessageType.ToWorkerThread) {
+
+			}
 		}
 	}
 
 	private static class WorkerThread extends HandlerThread {
 
 		private Integer workerId;
+		private Handler mainThreadHandler;
 
 		public WorkerThread(String name) {
 			super(name);
 		}
 
-		public WorkerThread(String name, Integer workerId) {
+		public WorkerThread(String name, Integer workerId, Handler mainThreadHandler) {
 			super("W: " + name);
 			this.workerId = workerId;
+			this.mainThreadHandler = mainThreadHandler;
 		}
 
 		@Override
 		public void run() {
 			super.run();
 			WorkThreadScheduler workThreadScheduler = new WorkThreadScheduler(new WorkerThreadHandler());
-			DynamicConfiguration dynamicConfiguration = new DynamicConfiguration(this.workerId, workThreadScheduler);
-			initRuntime(dynamicConfiguration);
+			DynamicConfiguration dynamicConfiguration = new DynamicConfiguration(this.workerId, workThreadScheduler, mainThreadHandler);
+			Runtime runtime = initRuntime(dynamicConfiguration);
+
+			/*
+				Send a message to the Main Thread to `shake hands`,
+				Main Thread will cache the Worker Handler for later use
+			 */
+			Message msg = Message.obtain();
+			msg.arg1 = MessageType.Handshake;
+			msg.arg2 = runtime.runtimeId;
+
+			runtime.mainThreadHandler.sendMessage(msg);
 		}
 	}
 
@@ -193,6 +235,29 @@ public class Runtime
 		@Override
 		public void handleMessage(Message msg) {
 			//todo: plamen5kov: implement main handle message
+			/*
+				Handle messages coming from a Worker thread
+			 */
+			if(msg.arg1 == MessageType.ToMainThread) {
+
+			}
+			/*
+				Handle a 'Handshake' message sent from a new Worker,
+				so that the Main may cache it and send messages to it later
+			 */
+			else if(msg.arg1 == MessageType.Handshake) {
+				int senderRuntimeId = msg.arg2;
+				Runtime workerRuntime = runtimeCache.get(senderRuntimeId);
+				Runtime mainRuntime = Runtime.getCurrentRuntime();
+
+				/*
+					Main thread now has a reference to the Worker's handler,
+					so messaging between the two threads can begin
+				 */
+				mainRuntime.workerIdToHandler.put(workerRuntime.getWorkerId(), workerRuntime.threadScheduler.getHandler());
+
+				mainRuntime.logger.write("A new Worker thread shook hands with the main thread!");
+			}
 		}
 	}
 
@@ -204,7 +269,7 @@ public class Runtime
 	public static Runtime initializeRuntimeWithConfiguration(StaticConfiguration config) {
 		staticConfiguration = config;
 		WorkThreadScheduler workThreadScheduler = new WorkThreadScheduler(new MainThreadHandler());
-		DynamicConfiguration dynamicConfiguration = new DynamicConfiguration(0, workThreadScheduler);
+		DynamicConfiguration dynamicConfiguration = new DynamicConfiguration(-1, workThreadScheduler);
 		Runtime runtime = initRuntime(dynamicConfiguration);
 
 		return runtime;
@@ -216,7 +281,9 @@ public class Runtime
 	 */
 	@RuntimeCallable
 	public static void initWorker (String jsFileName, int id) {
-		HandlerThread worker = new WorkerThread(jsFileName, id);
+		// This method will always be called from the Main thread
+		Handler mainThreadHandler = Runtime.getCurrentRuntime().threadScheduler.getHandler();
+		HandlerThread worker = new WorkerThread(jsFileName, id, mainThreadHandler);
 		worker.start();
 	}
 
@@ -225,10 +292,6 @@ public class Runtime
 		Does it both for workers and for the main thread
 	 */
 	private static Runtime initRuntime(DynamicConfiguration dynamicConfiguration) {
-
-		//setting handler operation needs to happen in Runtime.java
-		ThreadScheduler workThreadScheduler = new WorkThreadScheduler(new Handler(Looper.myLooper()));
-
 		Runtime runtime = new Runtime(staticConfiguration, dynamicConfiguration);
 		runtime.init();
 
@@ -385,7 +448,6 @@ public class Runtime
 		return result;
 	}
 
-	// TODO: Pete: new param - implementedInterfaces
 	@RuntimeCallable
 	private Class<?> resolveClass(String fullClassName, String[] methodOverrides, String[] implementedInterfaces, boolean isInterface) throws ClassNotFoundException, IOException
 	{
