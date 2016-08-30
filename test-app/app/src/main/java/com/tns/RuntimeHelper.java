@@ -104,7 +104,7 @@ public final class RuntimeHelper {
 				e.printStackTrace();
 			}
 
-			Configuration config = new Configuration(logger, debugger, appName, null, rootDir,
+			StaticConfiguration config = new StaticConfiguration(logger, debugger, appName, null, rootDir,
 					appDir, classLoader, dexDir, dexThumb, v8Config);
 
 			runtime = Runtime.initializeRuntimeWithConfiguration(config);
