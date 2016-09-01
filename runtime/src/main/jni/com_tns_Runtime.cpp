@@ -313,7 +313,7 @@ extern "C" void Java_com_tns_Runtime_ClearStartupData(JNIEnv *env, jobject obj, 
 	runtime->ClearStartupData(env, obj);
 }
 
-extern "C" void Java_com_tns_Runtime_OnMessageWorkerThreadCallback(JNIEnv *env, jobject obj, jint runtimeId, jstring msg)
+extern "C" void Java_com_tns_Runtime_WorkerGlobalOnMessageCallback(JNIEnv *env, jobject obj, jint runtimeId, jstring msg)
 {
 	// Worker Thread runtime
 	auto runtime = TryGetRuntime(runtimeId);
@@ -327,10 +327,10 @@ extern "C" void Java_com_tns_Runtime_OnMessageWorkerThreadCallback(JNIEnv *env, 
 	v8::Isolate::Scope isolate_scope(isolate);
 	v8::HandleScope handleScope(isolate);
 
-	CallbackHandlers::OnMessageWorkerThreadCallback(isolate, msg);
+	CallbackHandlers::WorkerGlobalOnMessageCallback(isolate, msg);
 }
 
-extern "C" void Java_com_tns_Runtime_OnMessageWorkerObjectCallback(JNIEnv *env, jobject obj, jint runtimeId, jint workerId, jstring msg)
+extern "C" void Java_com_tns_Runtime_WorkerObjectOnMessageCallback(JNIEnv *env, jobject obj, jint runtimeId, jint workerId, jstring msg)
 {
 	// Main Thread runtime
 	auto runtime = TryGetRuntime(runtimeId);
@@ -344,5 +344,5 @@ extern "C" void Java_com_tns_Runtime_OnMessageWorkerObjectCallback(JNIEnv *env, 
 	v8::Isolate::Scope isolate_scope(isolate);
 	v8::HandleScope handleScope(isolate);
 
-	CallbackHandlers::OnMessageWorkerObjectCallback(isolate, workerId, msg);
+	CallbackHandlers::WorkerObjectOnMessageCallback(isolate, workerId, msg);
 }
