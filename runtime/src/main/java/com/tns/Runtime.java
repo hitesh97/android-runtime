@@ -48,6 +48,8 @@ public class Runtime {
 
     private static native void WorkerObjectOnMessageCallback(int runtimeId, int workerId, String message);
 
+    private static native void TerminateWorkerCallback(int runtimeId);
+
     void passUncaughtExceptionToJs(Throwable ex, String stackTrace) {
         passUncaughtExceptionToJsNative(getRuntimeId(), ex, stackTrace);
     }
@@ -105,6 +107,8 @@ public class Runtime {
     private final DynamicConfiguration dynamicConfig;
 
     private final int runtimeId;
+
+    private boolean isTerminating;
 
     /*
         Used to map to Handler, for messaging between Main and the other Workers
@@ -192,6 +196,16 @@ public class Runtime {
     private static class WorkerThreadHandler extends Handler {
         @Override
         public void handleMessage(Message msg) {
+            Runtime currentRuntime = Runtime.getCurrentRuntime();
+
+            if(currentRuntime.isTerminating) {
+                if(currentRuntime.logger.isEnabled()) {
+                    currentRuntime.logger.write("Worker(id=" + currentRuntime.workerId + ") is terminating, it will not process the message.");
+                }
+
+                return;
+            }
+
             /*
 				Handle messages coming from the Main thread
 			 */
@@ -199,7 +213,19 @@ public class Runtime {
                 /*
                     Calls the Worker script's onmessage implementation with arg -> msg.obj.toString()
                  */
-                WorkerGlobalOnMessageCallback(Runtime.getCurrentRuntime().runtimeId, msg.obj.toString());
+                WorkerGlobalOnMessageCallback(currentRuntime.runtimeId, msg.obj.toString());
+            } else if (msg.arg1 == MessageType.TerminateThread) {
+                currentRuntime.isTerminating = true;
+
+                runtimeCache.remove(currentRuntime.runtimeId);
+
+                TerminateWorkerCallback(currentRuntime.runtimeId);
+
+                if(currentRuntime.logger.isEnabled()) {
+                    currentRuntime.logger.write("Worker(id=" + currentRuntime.workerId + ") has terminated execution. Don't make further function calls to it.");
+                }
+
+                this.getLooper().quit();
             }
         }
     }
@@ -275,15 +301,25 @@ public class Runtime {
 				 */
                 mainRuntime.workerIdToHandler.put(workerRuntime.getWorkerId(), workerRuntime.getHandler());
 
-                mainRuntime.logger.write("Worker thread (workerId:" + workerRuntime.getWorkerId() + ") shook hands with the main thread!");
+                if(mainRuntime.logger.isEnabled()) {
+                    mainRuntime.logger.write("Worker thread (workerId:" + workerRuntime.getWorkerId() + ") shook hands with the main thread!");
+                }
             }
             /*
                 Handle resending a main -> worker message with a delay
                 If a new worker is still initializing and does not have a messageHandler setup
-                we requeue the message to be sent from main to worker
+                the message is requeued to be sent again from main to worker
              */
             else if (msg.arg1 == MessageType.ResendToMain) {
                 sendMessageFromMainToWorker(msg.arg2, msg.obj.toString());
+            }
+            /*
+               Handle resending a main -> worker `terminate` instructions with a delay
+               if a new worker is still initializing and does not have a messageHandler setup
+               the message is requeued to be sent again from main to worker
+            */
+            else if (msg.arg1 == MessageType.ResendTerminate) {
+               terminateWorkerObject(msg.arg2);
             }
         }
     }
@@ -1005,6 +1041,7 @@ public class Runtime {
         Runtime currentRuntime = Runtime.getCurrentRuntime();
 
         Message msg = Message.obtain();
+        msg.obj = message;
 
         boolean hasKey = currentRuntime.workerIdToHandler.containsKey(workerId);
         Handler workerHandler = currentRuntime.workerIdToHandler.get(workerId);
@@ -1019,23 +1056,27 @@ public class Runtime {
             The workHandler is null because it has been closed; Check if its key is still in the map
          */
         if(workerHandler == null) {
-            // We attempt to send a message to a closed worker, throw error or just log a message
+            // Attempt to send a message to a closed worker, throw error or just log a message
             if(hasKey) {
-                Runtime.getCurrentRuntime().logger.write("Worker(id=" + msg.arg2 + ") that you are trying to send a message to has been terminated. No message will be sent.");
+                if(currentRuntime.logger.isEnabled()) {
+                    currentRuntime.logger.write("Worker(id=" + msg.arg2 + ") that you are trying to send a message to has been terminated. No message will be sent.");
+                }
+
                 return;
             }
 
             msg.arg1 = MessageType.ResendToMain;
             msg.arg2 = workerId;
 
-            Runtime.getCurrentRuntime().logger.write("Worker(id=" + msg.arg2 + ")'s handler still not initialized. Resending message from Main to Worker(id=" + msg.arg2 + ")");
+            if(currentRuntime.logger.isEnabled()) {
+                currentRuntime.logger.write("Worker(id=" + msg.arg2 + ")'s handler still not initialized. Resending message from Main to Worker(id=" + msg.arg2 + ")");
+            }
 
             currentRuntime.getHandler().sendMessageDelayed(msg, ResendDelay);
             return;
         }
 		else {
 			msg.arg1 = MessageType.MainToWorker;
-			msg.obj = message;
 		}
 
         workerHandler.sendMessage(msg);
@@ -1055,5 +1096,58 @@ public class Runtime {
         msg.obj = message;
 
         currentRuntime.mainThreadHandler.sendMessage(msg);
+    }
+
+    @RuntimeCallable
+    public static void terminateWorkerObject(int workerId) {
+        // Thread should always be main here
+        Runtime currentRuntime = Runtime.getCurrentRuntime();
+        final long ResendDelay = 1000;
+
+        Message msg = Message.obtain();
+
+        boolean hasKey = currentRuntime.workerIdToHandler.containsKey(workerId);
+        Handler workerHandler = currentRuntime.workerIdToHandler.get(workerId);
+
+        msg.arg1 = MessageType.TerminateThread;
+
+        /*
+            If workHandler is null then the new Worker Thread still hasn't completed initializing
+            Requeue the same message with a delay of `1000ms` to again try sending the message to the worker
+            OR
+            The workHandler is null because it has been closed; Check if its key is still in the map
+         */
+        if(workerHandler == null) {
+            // Attempt to send a message to a closed worker, throw error or just log a message
+            if(hasKey) {
+                if(currentRuntime.logger.isEnabled()) {
+                    currentRuntime.logger.write("Worker(id=" + msg.arg2 + ") is already terminated. No message will be sent.");
+                }
+
+                return;
+                // Worker isn't completely initialized, so the message is rescheduled
+            } else {
+                msg.arg1 = MessageType.ResendTerminate;
+                msg.arg2 = workerId;
+
+                if(currentRuntime.logger.isEnabled()) {
+                    currentRuntime.logger.write("Worker(id=" + msg.arg2 + ")'s handler still not initialized. Resending message from Main to Worker(id=" + msg.arg2 + ")");
+                }
+
+                currentRuntime.getHandler().sendMessageDelayed(msg, ResendDelay);
+
+                return;
+            }
+        }
+
+        msg.arg2 = workerId;
+
+        workerHandler.getLooper().getThread().interrupt();
+
+        // 'terminate' message must be executed immediately
+        workerHandler.sendMessageAtFrontOfQueue(msg);
+
+        // Set value for workerId key to null
+        currentRuntime.workerIdToHandler.put(workerId, null);
     }
 }
