@@ -3,10 +3,13 @@
 
 #include "jni.h"
 #include "v8.h"
+#include "include/v8.h"
 #include <string>
 
 namespace tns
 {
+	v8::Local<v8::String> JsonStringifyObject(v8::Isolate* isolate, v8::Handle<v8::Value> value);
+
 	v8::Local<v8::Value> V8GetHiddenValue(const v8::Local<v8::Object>& obj, const std::string& propName);
 
 	bool V8SetHiddenValue(const v8::Local<v8::Object>& obj, const std::string& propName, const v8::Local<v8::Value>& value);
